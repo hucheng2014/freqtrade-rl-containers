@@ -60,6 +60,15 @@ class MyTicketRL_v2(BaseRL):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
+        self._exchange_leverage = 1.0
+        try:
+            cfg = kwargs.get("config") or getattr(self, "config", None) or {}
+            exchange_cfg = (cfg.get("exchange") or {}) if isinstance(cfg, dict) else {}
+            self._exchange_leverage = float(exchange_cfg.get("leverage") or 1.0)
+            if self._exchange_leverage <= 0:
+                self._exchange_leverage = 1.0
+        except Exception:
+            self._exchange_leverage = 1.0
 
         # Experience Replay 配置
         er_config = self.rl_config.get("experience_replay", {})
@@ -74,10 +83,11 @@ class MyTicketRL_v2(BaseRL):
         self.ar_enabled = ar_config.get("enabled", True)
         self.ar_lookback = ar_config.get("lookback_trades", 50)
         self.ar_rate = ar_config.get("adjustment_rate", 0.1)
+        self._exp_storage_dir = self._experience_storage_dir()
 
         # 初始化组件
         self.exp_buffer = ExperienceBuffer(
-            storage_dir="user_data/experience_replay",
+            storage_dir=self._exp_storage_dir,
             max_experiences=self.max_experiences,
         )
         self.perf_tracker = PerformanceTracker(
@@ -93,8 +103,22 @@ class MyTicketRL_v2(BaseRL):
             f"[MyTicketRL_v2] Initialized: "
             f"experience_replay={'ON' if self.er_enabled else 'OFF'}, "
             f"adaptive_reward={'ON' if self.ar_enabled else 'OFF'}, "
-            f"replay_ratio={self.replay_ratio}"
+            f"replay_ratio={self.replay_ratio}, "
+            f"storage_dir={self._exp_storage_dir}"
         )
+
+    def _experience_storage_dir(self, leverage: float | None = None) -> str:
+        try:
+            lev = float(leverage if leverage is not None else self._exchange_leverage)
+        except Exception:
+            lev = 1.0
+        if lev <= 0:
+            lev = 1.0
+        if abs(lev - round(lev)) < 1e-9:
+            tag = f"{int(round(lev))}x"
+        else:
+            tag = f"{str(lev).replace('.', 'p')}x"
+        return f"user_data/experience_replay_{tag}"
 
     def fit(self, data_dictionary: dict[str, Any], dk: FreqaiDataKitchen, **kwargs):
         """
@@ -344,6 +368,7 @@ class MyTicketRL_v2(BaseRL):
             # 提取自定义参数
             self.replay_experiences = kwargs.pop("replay_experiences", [])
             super().__init__(**kwargs)
+            self._leverage = getattr(getattr(self, "parent_model", None), "_exchange_leverage", 1.0)
 
             # 预计算经验回放查找表
             self._replay_lookup = self._build_replay_lookup()
@@ -390,11 +415,27 @@ class MyTicketRL_v2(BaseRL):
             - 如果当前决策模式匹配过去的盈利经验 → 额外奖励
             """
             # 获取 reward 参数 (可能已被 PerformanceTracker 调整)
-            rr = self.rl_config.get("model_reward_parameters", {})
+            rr = dict(self.rl_config.get("model_reward_parameters", {}))
+            reward_kwargs = getattr(self, "reward_kwargs", None)
+            if isinstance(reward_kwargs, dict) and reward_kwargs:
+                rr.update(reward_kwargs)
             profit_aim = rr.get("profit_aim", 0.025)
             win_factor = rr.get("win_reward_factor", 2.0)
             time_pen = rr.get("time_penalty", 0.0001)
             dd_pen = rr.get("dd_penalty", 0.02)
+
+            loss_penalty_factor = float(rr.get("loss_penalty_factor", 1.0) or 1.0)
+            tail_loss_threshold = float(rr.get("tail_loss_threshold", 0.0) or 0.0)
+            tail_loss_multiplier = float(rr.get("tail_loss_multiplier", 0.0) or 0.0)
+            tail_loss_power = float(rr.get("tail_loss_power", 2.0) or 2.0)
+            profit_hold_factor = float(rr.get("profit_hold_factor", 0.01) or 0.01)
+            reward_clip = float(rr.get("reward_clip", 100.0) or 0.0)
+            hold_loss_penalty_scale = float(rr.get("hold_loss_penalty_scale", 1.0) or 0.0)
+            max_trade_duration_hours = float(rr.get("max_trade_duration_hours", 46.0) or 46.0)
+            max_trade_duration_bars = int(rr.get("max_trade_duration_bars", round(max_trade_duration_hours * 12)) or 0)
+            age_linear_penalty_per_bar = float(rr.get("age_linear_penalty_per_bar", 0.00001) or 0.0)
+            early_exit_bonus_beta = float(rr.get("early_exit_bonus_beta", 0.002) or 0.0)
+            forced_close_penalty = float(rr.get("forced_close_penalty", 0.03) or 0.0)
 
             factor = 100.0
 
@@ -403,6 +444,20 @@ class MyTicketRL_v2(BaseRL):
             trade_duration = 0
             if self._last_trade_tick is not None:
                 trade_duration = self._current_tick - self._last_trade_tick
+
+            def _timing_reward_adjustment(is_exit_like: bool) -> float:
+                if max_trade_duration_bars <= 0:
+                    return 0.0
+                overage_bars = max(0, trade_duration - max_trade_duration_bars)
+                adjust = -age_linear_penalty_per_bar * overage_bars
+                if is_exit_like:
+                    if overage_bars > 0:
+                        adjust -= forced_close_penalty
+                    elif early_exit_bonus_beta > 0:
+                        adjust += early_exit_bonus_beta * (
+                            (max_trade_duration_bars - trade_duration) / max_trade_duration_bars
+                        )
+                return float(adjust)
 
             # ====== 空仓状态 ======
             if self._position == Positions.Neutral:
@@ -425,7 +480,11 @@ class MyTicketRL_v2(BaseRL):
                     replay_bonus = self._get_exit_replay_bonus(
                         "long", pnl, trade_duration
                     )
-                    return base_reward + replay_bonus
+                    reward = base_reward + replay_bonus
+                    reward += _timing_reward_adjustment(True)
+                    if reward_clip > 0:
+                        reward = float(np.clip(reward, -reward_clip, reward_clip))
+                    return float(reward)
 
                 elif action == Actions.Short_enter.value:
                     # 多转空
@@ -440,9 +499,11 @@ class MyTicketRL_v2(BaseRL):
                 else:
                     # 持仓中: 使用基于价格变动的权重惩罚
                     reward = -time_pen * trade_duration
+                    reward += _timing_reward_adjustment(False)
                     if pnl < 0:
+                        reward -= abs(pnl) * hold_loss_penalty_scale
                         # 亏损时根据价格变动区间给予不同权重惩罚
-                        leverage = getattr(self, '_leverage', 3.0)
+                        leverage = getattr(self, "_leverage", 1.0)
                         price_change = pnl / leverage if leverage > 0 else pnl
                         abs_price_change = abs(price_change)
                         
@@ -455,9 +516,27 @@ class MyTicketRL_v2(BaseRL):
                         else:
                             weight = 3.0  # >6% 价格变动
                         
-                        reward -= dd_pen * abs(pnl) * factor * weight
+                        tail_mult = 1.0
+                        if (
+                            tail_loss_threshold > 0
+                            and tail_loss_multiplier > 0
+                            and abs_price_change > tail_loss_threshold
+                        ):
+                            ratio = (abs_price_change - tail_loss_threshold) / tail_loss_threshold
+                            tail_mult = 1.0 + tail_loss_multiplier * (ratio ** tail_loss_power)
+
+                        reward -= (
+                            dd_pen
+                            * abs(pnl)
+                            * factor
+                            * weight
+                            * loss_penalty_factor
+                            * tail_mult
+                        )
                     elif pnl > 0:
-                        reward += pnl * factor * 0.01
+                        reward += pnl * factor * profit_hold_factor
+                    if reward_clip > 0:
+                        reward = float(np.clip(reward, -reward_clip, reward_clip))
                     return float(reward)
 
             # ====== 空头持仓 ======
@@ -469,13 +548,21 @@ class MyTicketRL_v2(BaseRL):
                     replay_bonus = self._get_exit_replay_bonus(
                         "short", pnl, trade_duration
                     )
-                    return base_reward + replay_bonus
+                    reward = base_reward + replay_bonus
+                    reward += _timing_reward_adjustment(True)
+                    if reward_clip > 0:
+                        reward = float(np.clip(reward, -reward_clip, reward_clip))
+                    return float(reward)
 
                 elif action == Actions.Long_enter.value:
                     if pnl > 0:
-                        return float(pnl * factor * win_factor * 0.8)
+                        reward = float(pnl * factor * win_factor * 0.8)
                     else:
-                        return float(pnl * factor)
+                        reward = float(pnl * factor)
+                    reward += _timing_reward_adjustment(True)
+                    if reward_clip > 0:
+                        reward = float(np.clip(reward, -reward_clip, reward_clip))
+                    return float(reward)
 
                 elif action == Actions.Short_enter.value:
                     return -1.0
@@ -483,8 +570,10 @@ class MyTicketRL_v2(BaseRL):
                 else:
                     # 持仓中: 使用基于价格变动的权重惩罚
                     reward = -time_pen * trade_duration
+                    reward += _timing_reward_adjustment(False)
                     if pnl < 0:
-                        leverage = getattr(self, '_leverage', 3.0)
+                        reward -= abs(pnl) * hold_loss_penalty_scale
+                        leverage = getattr(self, "_leverage", 1.0)
                         price_change = pnl / leverage if leverage > 0 else pnl
                         abs_price_change = abs(price_change)
                         
@@ -497,9 +586,27 @@ class MyTicketRL_v2(BaseRL):
                         else:
                             weight = 3.0
                         
-                        reward -= dd_pen * abs(pnl) * factor * weight
+                        tail_mult = 1.0
+                        if (
+                            tail_loss_threshold > 0
+                            and tail_loss_multiplier > 0
+                            and abs_price_change > tail_loss_threshold
+                        ):
+                            ratio = (abs_price_change - tail_loss_threshold) / tail_loss_threshold
+                            tail_mult = 1.0 + tail_loss_multiplier * (ratio ** tail_loss_power)
+
+                        reward -= (
+                            dd_pen
+                            * abs(pnl)
+                            * factor
+                            * weight
+                            * loss_penalty_factor
+                            * tail_mult
+                        )
                     elif pnl > 0:
-                        reward += pnl * factor * 0.01
+                        reward += pnl * factor * profit_hold_factor
+                    if reward_clip > 0:
+                        reward = float(np.clip(reward, -reward_clip, reward_clip))
                     return float(reward)
 
             return 0.0
@@ -519,7 +626,7 @@ class MyTicketRL_v2(BaseRL):
             目标: RL 在硬止损触发前(价格变动6%)积极减亏
             """
             # 获取杠杆倍数，将杠杆后盈亏转换为价格变动率
-            leverage = getattr(self, '_leverage', 3.0)
+            leverage = getattr(self, "_leverage", 1.0)
             price_change = pnl / leverage if leverage > 0 else pnl
             
             if pnl > 0:
@@ -547,7 +654,26 @@ class MyTicketRL_v2(BaseRL):
                 
                 # 负奖励 = 亏损金额 × 因子 × 权重
                 # 注意: pnl 是负数，所以结果是负奖励(惩罚)
-                reward = pnl * factor * weight
+                rr = dict(self.rl_config.get("model_reward_parameters", {}))
+                reward_kwargs = getattr(self, "reward_kwargs", None)
+                if isinstance(reward_kwargs, dict) and reward_kwargs:
+                    rr.update(reward_kwargs)
+
+                loss_penalty_factor = float(rr.get("loss_penalty_factor", 1.0) or 1.0)
+                if loss_penalty_factor <= 0:
+                    loss_penalty_factor = 1.0
+
+                exit_loss_factor = rr.get(
+                    "exit_loss_factor", rr.get("early_exit_penalty", 1.0)
+                )
+                try:
+                    exit_loss_factor = float(exit_loss_factor or 1.0)
+                except Exception:
+                    exit_loss_factor = 1.0
+                if exit_loss_factor <= 0:
+                    exit_loss_factor = 1.0
+
+                reward = pnl * factor * weight * loss_penalty_factor * exit_loss_factor
                 return float(reward)
 
         def _get_entry_replay_bonus(self, action: int) -> float:

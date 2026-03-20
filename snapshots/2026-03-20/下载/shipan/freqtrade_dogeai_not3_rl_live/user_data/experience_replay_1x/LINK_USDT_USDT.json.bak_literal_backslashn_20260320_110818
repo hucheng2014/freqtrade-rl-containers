@@ -1,0 +1,23 @@
+[
+  {
+    "trade_id": 49,
+    "pair": "LINK/USDT:USDT",
+    "side": "short",
+    "entry_time": "2026-02-28T18:35:32.632336+00:00",
+    "exit_time": "2026-03-01T01:53:06.075756+00:00",
+    "entry_price": 8.512,
+    "exit_price": 9.023,
+    "profit_ratio": -0.061093457913167115,
+    "stake_amount": 8.625493333333333,
+    "duration_seconds": 26253,
+    "exit_reason": "stoploss_on_exchange",
+    "leverage": 1.0,
+    "recorded_at": "2026-03-01T01:53:06.078641+00:00",
+    "duration_candles": 87,
+    "features_at_entry": {},
+    "features_during_trade": [],
+    "max_drawdown": 0.0,
+    "max_profit": 0.0,
+    "migrated_from_leverage": 3.0
+  }
+]\n

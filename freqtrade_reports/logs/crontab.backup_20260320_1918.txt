@@ -1,0 +1,2 @@
+0 0 * * * /home/jianglei/.openclaw/workspace/cron/self-reflection-00h00.sh
+0 * * * * /home/jianglei/.openclaw/workspace/scripts/local_monitor_send.sh >> /tmp/local_monitor.log 2>&1

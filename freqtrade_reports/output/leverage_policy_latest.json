@@ -1,0 +1,80 @@
+[
+  {
+    "container": "RL_SignalFilter_LIVE",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_rl_live/config_rl_live.json",
+    "closed_trades": 31,
+    "current_leverage_before": 1,
+    "recommended_actionable_raw": 1.0,
+    "desired_integer_capped": 1,
+    "target_leverage_after_policy": 1,
+    "current_identifier_before": "rl_live_v3_rewardfix_lev1x_20260313_011218",
+    "target_identifier_after_policy": "rl_live_v3_rewardfix_lev1x_20260313_011218",
+    "leverage_changed": false,
+    "margin_mode_before": "isolated",
+    "margin_mode_after": "isolated",
+    "changed": false,
+    "restarted": false,
+    "dry_run": false,
+    "reason": [
+      "recommended_floor=1"
+    ],
+    "backup_path": null,
+    "model_backup_path": null,
+    "target_identifier_backup_path": null,
+    "seeded_model_metadata": [],
+    "seeded_experience_files": [],
+    "note": null
+  },
+  {
+    "container": "RL_SelfEvolve_DRY",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_rl_selfevolve/config_selfevolve.json",
+    "closed_trades": 26,
+    "current_leverage_before": 1,
+    "recommended_actionable_raw": 1.0,
+    "desired_integer_capped": 1,
+    "target_leverage_after_policy": 1,
+    "current_identifier_before": "rl_selfevolve_v2_lev1x_20260313_011218",
+    "target_identifier_after_policy": "rl_selfevolve_v2_lev1x_20260313_011218",
+    "leverage_changed": false,
+    "margin_mode_before": "isolated",
+    "margin_mode_after": "isolated",
+    "changed": false,
+    "restarted": false,
+    "dry_run": false,
+    "reason": [
+      "recommended_floor=1"
+    ],
+    "backup_path": null,
+    "model_backup_path": null,
+    "target_identifier_backup_path": null,
+    "seeded_model_metadata": [],
+    "seeded_experience_files": [],
+    "note": null
+  },
+  {
+    "container": "DogeAI_NoT3_RL_WithBTC_LIVE",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_dogeai_not3_rl_live/config.json",
+    "closed_trades": 18,
+    "current_leverage_before": 1,
+    "recommended_actionable_raw": 1.0,
+    "desired_integer_capped": 1,
+    "target_leverage_after_policy": 1,
+    "current_identifier_before": "dogeai_not3_rl_withbtc_live_v2_lev1x_20260320_110455",
+    "target_identifier_after_policy": "dogeai_not3_rl_withbtc_live_v2_lev1x_20260320_110455",
+    "leverage_changed": false,
+    "margin_mode_before": "isolated",
+    "margin_mode_after": "isolated",
+    "changed": false,
+    "restarted": false,
+    "dry_run": false,
+    "reason": [
+      "closed_trades<20"
+    ],
+    "backup_path": null,
+    "model_backup_path": null,
+    "target_identifier_backup_path": null,
+    "seeded_model_metadata": [],
+    "seeded_experience_files": [],
+    "note": "闭单数低于 min_trades=20，仅供参考。"
+  }
+]

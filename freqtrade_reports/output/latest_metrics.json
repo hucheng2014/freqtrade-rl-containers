@@ -1,0 +1,383 @@
+[
+  {
+    "container": "RL_SignalFilter_LIVE",
+    "db_path": "/home/jianglei/下载/shipan/freqtrade_rl_live/user_data/tradesv3.sqlite",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_rl_live/config_rl_live.json",
+    "db_mtime_utc": "2026-03-20T10:00:05+00:00",
+    "lookback_days": 7,
+    "lookback_hours": null,
+    "bucket_hours": 24,
+    "aggregation_mode": "daily_shanghai",
+    "aggregation_label": "日",
+    "days_in_window": 7,
+    "buckets_in_window": 7,
+    "window_start_sh": "2026-03-14T00:00:00+08:00",
+    "window_end_sh": "2026-03-20T19:18:28+08:00",
+    "current_leverage": 1.0,
+    "stake_currency": "USDT",
+    "post_fix_start_utc": "2026-03-05T20:52:55+00:00",
+    "post_fix_closed_trades": 99,
+    "post_fix_to_100": 1,
+    "post_fix_to_300": 201,
+    "closed_trades": 31,
+    "first_close_utc": "2026-03-13T22:01:30+00:00",
+    "last_close_utc": "2026-03-19T17:09:33+00:00",
+    "avg_trade_return": -0.00852131914850436,
+    "stdev_trade_return": 0.08060167502175375,
+    "variance_trade_return": 0.006496630016312403,
+    "win_rate": 0.5161290322580645,
+    "trades_per_year": 365.0,
+    "sharpe_trade": -0.10572136554487885,
+    "sharpe_annualized": -2.0198038527109436,
+    "kelly_full": -1.3116522146263772,
+    "half_kelly_raw": -0.6558261073131886,
+    "half_kelly_recommended": 0.0,
+    "leverage_recommended_actionable": 1.0,
+    "edge_label": "负边际",
+    "leverage_label": "观察",
+    "expected_growth_half_kelly": -0.01176963415666056,
+    "expected_growth_trade_pct": -1.176963415666056,
+    "expected_growth_annual_pct": -429.59164671811044,
+    "today_pnl_abs": 0.34529693,
+    "current_bucket_label": "03-20",
+    "current_bucket_pnl_abs": 0.34529693,
+    "window_pnl_abs": 1.0862632400000003,
+    "bucket_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.04188423000000002,
+        "bucket_return": 0.005112293196956504
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": 0.0,
+        "bucket_return": 0.0
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": -1.0317113599999999,
+        "bucket_return": -0.18805164431229843
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.36322249,
+        "bucket_return": 0.0231045605256842
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": 0.73224593,
+        "bucket_return": 0.038163802433681296
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": 0.63532502,
+        "bucket_return": 0.04062514413054128
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.34529693,
+        "bucket_return": 0.021396609985904633
+      }
+    ],
+    "daily_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.04188423000000002
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": 0.0
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": -1.0317113599999999
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.36322249
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": 0.73224593
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": 0.63532502
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.34529693
+      }
+    ],
+    "leverage_advice": "保留1.00x采样，继续收集样本。",
+    "note": null
+  },
+  {
+    "container": "RL_SelfEvolve_DRY",
+    "db_path": "/home/jianglei/下载/shipan/freqtrade_rl_selfevolve/user_data/tradesv3.sqlite",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_rl_selfevolve/config_selfevolve.json",
+    "db_mtime_utc": "2026-03-20T10:15:35+00:00",
+    "lookback_days": 7,
+    "lookback_hours": null,
+    "bucket_hours": 24,
+    "aggregation_mode": "daily_shanghai",
+    "aggregation_label": "日",
+    "days_in_window": 7,
+    "buckets_in_window": 7,
+    "window_start_sh": "2026-03-14T00:00:00+08:00",
+    "window_end_sh": "2026-03-20T19:18:28+08:00",
+    "current_leverage": 1.0,
+    "stake_currency": "USDT",
+    "post_fix_start_utc": "2026-03-03T14:58:48+00:00",
+    "post_fix_closed_trades": 65,
+    "post_fix_to_100": 35,
+    "post_fix_to_300": 235,
+    "closed_trades": 26,
+    "first_close_utc": "2026-03-13T18:18:55+00:00",
+    "last_close_utc": "2026-03-19T15:18:53+00:00",
+    "avg_trade_return": -0.001540970626547732,
+    "stdev_trade_return": 0.02738148519667771,
+    "variance_trade_return": 0.0007497457315758806,
+    "win_rate": 0.5769230769230769,
+    "trades_per_year": 365.0,
+    "sharpe_trade": -0.056277832100017106,
+    "sharpe_annualized": -1.0751864725922504,
+    "kelly_full": -2.0553243074939367,
+    "half_kelly_raw": -1.0276621537469683,
+    "half_kelly_recommended": 0.0,
+    "leverage_recommended_actionable": 1.0,
+    "edge_label": "负边际",
+    "leverage_label": "观察",
+    "expected_growth_half_kelly": -0.0019158434923356722,
+    "expected_growth_trade_pct": -0.1915843492335672,
+    "expected_growth_annual_pct": -69.92828747025203,
+    "today_pnl_abs": 0.0,
+    "current_bucket_label": "03-20",
+    "current_bucket_pnl_abs": 0.0,
+    "window_pnl_abs": 0.16419947999999987,
+    "bucket_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.15959005,
+        "bucket_return": 0.021190429322159424
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": 0.0,
+        "bucket_return": 0.0
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": -0.4269445100000001,
+        "bucket_return": -0.04970769776842574
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.16492416,
+        "bucket_return": 0.00898452278908931
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": 0.64445526,
+        "bucket_return": 0.03154133525578704
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": -0.37782548,
+        "bucket_return": -0.022795383984444157
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.0,
+        "bucket_return": 0.0
+      }
+    ],
+    "daily_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.15959005
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": 0.0
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": -0.4269445100000001
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.16492416
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": 0.64445526
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": -0.37782548
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.0
+      }
+    ],
+    "leverage_advice": "保留1.00x采样，继续收集样本。",
+    "note": null
+  },
+  {
+    "container": "DogeAI_NoT3_RL_WithBTC_LIVE",
+    "db_path": "/home/jianglei/下载/shipan/freqtrade_dogeai_not3_rl_live/user_data/tradesv3.sqlite",
+    "config_path": "/home/jianglei/下载/shipan/freqtrade_dogeai_not3_rl_live/config.json",
+    "db_mtime_utc": "2026-03-20T11:05:07+00:00",
+    "lookback_days": 7,
+    "lookback_hours": null,
+    "bucket_hours": 24,
+    "aggregation_mode": "daily_shanghai",
+    "aggregation_label": "日",
+    "days_in_window": 7,
+    "buckets_in_window": 7,
+    "window_start_sh": "2026-03-14T00:00:00+08:00",
+    "window_end_sh": "2026-03-20T19:18:28+08:00",
+    "current_leverage": 1.0,
+    "stake_currency": "USDT",
+    "post_fix_start_utc": "2026-03-05T20:43:05+00:00",
+    "post_fix_closed_trades": 38,
+    "post_fix_to_100": 62,
+    "post_fix_to_300": 262,
+    "closed_trades": 18,
+    "first_close_utc": "2026-03-13T20:15:34+00:00",
+    "last_close_utc": "2026-03-19T22:40:27+00:00",
+    "avg_trade_return": -0.00266007054316003,
+    "stdev_trade_return": 0.06113927404128776,
+    "variance_trade_return": 0.003738010830295683,
+    "win_rate": 0.6111111111111112,
+    "trades_per_year": 365.0,
+    "sharpe_trade": -0.04350837632392669,
+    "sharpe_annualized": -0.8312263625365325,
+    "kelly_full": -0.7116272969571932,
+    "half_kelly_raw": -0.3558136484785966,
+    "half_kelly_recommended": 0.0,
+    "leverage_recommended_actionable": 1.0,
+    "edge_label": "负边际",
+    "leverage_label": "观察",
+    "expected_growth_half_kelly": -0.004529075958307871,
+    "expected_growth_trade_pct": -0.4529075958307871,
+    "expected_growth_annual_pct": -165.3112724782373,
+    "today_pnl_abs": 0.503928,
+    "current_bucket_label": "03-20",
+    "current_bucket_pnl_abs": 0.503928,
+    "window_pnl_abs": -1.53560763,
+    "bucket_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.32142809,
+        "bucket_return": 0.039447517495859355
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": -0.06582809,
+        "bucket_return": -0.004710223314094921
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": 0.21478883,
+        "bucket_return": 0.029819172876163296
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.64711644,
+        "bucket_return": 0.052936929689231055
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": -0.58034686,
+        "bucket_return": -0.0400578191196566
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": -2.57669404,
+        "bucket_return": -0.12215559155867686
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.503928,
+        "bucket_return": 0.026099520129054466
+      }
+    ],
+    "daily_pnl_abs": [
+      {
+        "date": "2026-03-14T00:00:00+08:00",
+        "label": "03-14",
+        "pnl_abs": 0.32142809
+      },
+      {
+        "date": "2026-03-15T00:00:00+08:00",
+        "label": "03-15",
+        "pnl_abs": -0.06582809
+      },
+      {
+        "date": "2026-03-16T00:00:00+08:00",
+        "label": "03-16",
+        "pnl_abs": 0.21478883
+      },
+      {
+        "date": "2026-03-17T00:00:00+08:00",
+        "label": "03-17",
+        "pnl_abs": 0.64711644
+      },
+      {
+        "date": "2026-03-18T00:00:00+08:00",
+        "label": "03-18",
+        "pnl_abs": -0.58034686
+      },
+      {
+        "date": "2026-03-19T00:00:00+08:00",
+        "label": "03-19",
+        "pnl_abs": -2.57669404
+      },
+      {
+        "date": "2026-03-20T00:00:00+08:00",
+        "label": "03-20",
+        "pnl_abs": 0.503928
+      }
+    ],
+    "leverage_advice": "保留1.00x采样，继续收集样本。",
+    "note": "闭单数低于 min_trades=20，仅供参考。"
+  }
+]

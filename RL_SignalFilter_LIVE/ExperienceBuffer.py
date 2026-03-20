@@ -12,6 +12,7 @@ experience replay 使用。
 """
 
 import json
+import contextlib
 import logging
 import os
 import time
@@ -45,6 +46,25 @@ class ExperienceBuffer:
         self.max_age_days = max_age_days
         self._cache: list[dict] = []
         self._cache_loaded = False
+        # 用于跨实例写入的缓存失效：当 JSON 文件被其他实例更新时自动重载
+        self._cache_key: tuple[int, int] = (0, 0)  # (file_count, max_mtime_ns)
+
+    def _disk_state_key(self) -> tuple[int, int]:
+        """返回当前磁盘状态 key，用于判断是否需要重载缓存。"""
+        try:
+            files = list(self.storage_dir.glob("*.json"))
+        except Exception:
+            return (0, 0)
+
+        max_mtime_ns = 0
+        for fp in files:
+            try:
+                mtime_ns = fp.stat().st_mtime_ns
+            except Exception:
+                continue
+            if mtime_ns > max_mtime_ns:
+                max_mtime_ns = mtime_ns
+        return (len(files), max_mtime_ns)
 
     def record_trade(
         self,
@@ -57,7 +77,7 @@ class ExperienceBuffer:
         """
         记录一笔完成的交易经验。
 
-        在策略的 confirm_trade_exit 中调用。
+        在策略的 order_filled（平仓成交后）中调用。
         """
         try:
             # 基础交易信息（兼容 emergency_exit / 提前回调场景）
@@ -174,9 +194,11 @@ class ExperienceBuffer:
         :param min_count: 最少需要的经验数，不足则返回空列表
         :return: 经验列表
         """
-        if not self._cache_loaded:
+        current_key = self._disk_state_key()
+        if (not self._cache_loaded) or (current_key != self._cache_key):
             self._cache = self._load_all_experiences()
             self._cache_loaded = True
+            self._cache_key = current_key
 
         experiences = self._cache
         if pair:
@@ -196,14 +218,20 @@ class ExperienceBuffer:
         batch_size: int = 50,
         loss_weight: float = 2.0,
         recency_decay: float = 0.95,
+        loss_mag_scale: float = 0.02,
+        loss_mag_power: float = 2.0,
+        dd_mag_scale: float = 0.03,
+        dd_mag_power: float = 2.0,
+        max_weight: float = 1e6,
     ) -> list[dict]:
         """
         按优先级权重采样经验批次。
 
         权重规则:
         - 亏损交易权重 = loss_weight (默认 2x)
+        - 亏损幅度越大 / 最大回撤越深 → 权重越高 (凸惩罚)
+        - 止损 / emergency_exit 额外加权 (识别危险模式)
         - 近期交易权重更高 (指数衰减)
-        - 止损触发的交易额外加权 (识别危险模式)
         """
         experiences = self.load_experiences()
         if not experiences:
@@ -212,22 +240,46 @@ class ExperienceBuffer:
         n = len(experiences)
         batch_size = min(batch_size, n)
 
-        # 计算权重
         weights = np.ones(n, dtype=float)
         for i, exp in enumerate(experiences):
-            # 亏损交易加权
-            if exp.get("profit_ratio", 0) < 0:
-                weights[i] *= loss_weight
-                # 止损触发额外加权
-                if "stoploss" in str(exp.get("exit_reason", "")).lower():
-                    weights[i] *= 1.5
+            profit = exp.get("profit_ratio", 0.0)
+            try:
+                profit_f = float(profit or 0.0)
+            except Exception:
+                profit_f = 0.0
 
-            # 时间衰减: 越近的交易权重越高
-            age_idx = n - 1 - i  # 假设按时间排序，越后面越新
+            exit_reason = str(exp.get("exit_reason", "")).lower()
+
+            if profit_f < 0:
+                weights[i] *= loss_weight
+
+                if "stoploss" in exit_reason:
+                    weights[i] *= 1.5
+                if "emergency" in exit_reason:
+                    weights[i] *= 2.0
+
+                loss_mag = abs(profit_f)
+                if loss_mag_scale > 0:
+                    weights[i] *= 1.0 + (loss_mag / loss_mag_scale) ** loss_mag_power
+
+                try:
+                    dd_mag = abs(float(exp.get("max_drawdown", 0.0) or 0.0))
+                except Exception:
+                    dd_mag = 0.0
+                if dd_mag_scale > 0:
+                    weights[i] *= 1.0 + (dd_mag / dd_mag_scale) ** dd_mag_power
+
+            age_idx = n - 1 - i
             weights[i] *= recency_decay ** age_idx
 
+        weights = np.clip(weights, 1e-12, max_weight)
+
         # 归一化为概率分布
-        probs = weights / weights.sum()
+        total_w = float(weights.sum())
+        if not np.isfinite(total_w) or total_w <= 0:
+            probs = np.full(n, 1.0 / n, dtype=float)
+        else:
+            probs = weights / total_w
 
         # 按权重采样
         indices = np.random.choice(n, size=batch_size, replace=False, p=probs)
@@ -296,6 +348,72 @@ class ExperienceBuffer:
 
     # ==================== 内部方法 ====================
 
+    @staticmethod
+    @contextlib.contextmanager
+    def _exclusive_lock(
+        lock_path: Path, timeout_s: float = 10.0, stale_lock_s: float = 300.0
+    ):
+        """
+        基于 O_EXCL 的进程级锁文件。
+        释放时删除 .lock 文件，并自动回收超时残留的 stale lock。
+        """
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd: Optional[int] = None
+        start = time.time()
+
+        while True:
+            try:
+                lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.write(lock_fd, f"{os.getpid()} {time.time():.6f}\n".encode("utf-8"))
+                break
+            except FileExistsError:
+                try:
+                    age_s = time.time() - lock_path.stat().st_mtime
+                    if age_s >= stale_lock_s:
+                        lock_path.unlink()
+                        logger.warning(
+                            "[ExperienceBuffer] Removed stale lock %s (age %.1fs)",
+                            lock_path,
+                            age_s,
+                        )
+                        continue
+                except FileNotFoundError:
+                    continue
+
+                if time.time() - start >= timeout_s:
+                    raise TimeoutError(f"Timed out waiting for lock {lock_path}")
+                time.sleep(0.05)
+
+        try:
+            yield
+        finally:
+            if lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                except Exception:
+                    pass
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                logger.debug(f"[ExperienceBuffer] Failed to cleanup lock {lock_path}: {e}")
+
+    @staticmethod
+    def _to_utc_timestamp(value: Any) -> Optional[pd.Timestamp]:
+        """将任意时间值安全转换为 UTC 时间戳。"""
+        try:
+            if value is None:
+                return None
+            ts = pd.Timestamp(value)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            else:
+                ts = ts.tz_convert("UTC")
+            return ts
+        except Exception:
+            return None
+
     def _extract_features_snapshot(
         self, df: pd.DataFrame, entry_time: datetime
     ) -> dict:
@@ -304,14 +422,18 @@ class ExperienceBuffer:
             if "date" not in df.columns:
                 return {}
 
-            # 找到最接近入场时间的行
             df_dated = df.copy()
-            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True)
-            mask = df_dated["date"] <= pd.Timestamp(entry_time, tz="UTC")
-            if mask.sum() == 0:
+            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True, errors="coerce")
+            df_dated = df_dated.dropna(subset=["date"])
+            if df_dated.empty:
                 return {}
 
-            row = df_dated[mask].iloc[-1]
+            entry_ts = self._to_utc_timestamp(entry_time)
+            if entry_ts is None:
+                entry_ts = df_dated["date"].iloc[-1]
+
+            mask = df_dated["date"] <= entry_ts
+            row = df_dated[mask].iloc[-1] if mask.any() else df_dated.iloc[-1]
 
             # 只提取特征列（以 % 开头的列）
             feature_cols = [c for c in df.columns if c.startswith("%-")]
@@ -319,7 +441,27 @@ class ExperienceBuffer:
             for col in feature_cols[:30]:  # 限制数量防止过大
                 val = row.get(col)
                 if val is not None and not (isinstance(val, float) and np.isnan(val)):
-                    snapshot[col] = float(val)
+                    try:
+                        snapshot[col] = float(val)
+                    except Exception:
+                        continue
+
+            # 特征列缺失时，回退到核心行情/指标字段，避免空样本
+            if not snapshot:
+                fallback_cols = [
+                    "rsi", "t3", "t3_slope", "t3_diff",
+                    "close", "open", "high", "low", "volume",
+                ]
+                for col in fallback_cols:
+                    if col not in row.index:
+                        continue
+                    val = row.get(col)
+                    if val is None or (isinstance(val, float) and np.isnan(val)):
+                        continue
+                    try:
+                        snapshot[col] = float(val)
+                    except Exception:
+                        continue
 
             return snapshot
         except Exception as e:
@@ -335,15 +477,22 @@ class ExperienceBuffer:
                 return []
 
             df_dated = df.copy()
-            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True)
-            entry_ts = pd.Timestamp(entry_time, tz="UTC")
-            exit_ts = pd.Timestamp(exit_time, tz="UTC") if isinstance(exit_time, datetime) else pd.Timestamp(str(exit_time), tz="UTC")
+            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True, errors="coerce")
+            df_dated = df_dated.dropna(subset=["date"])
+            if df_dated.empty:
+                return []
+
+            entry_ts = self._to_utc_timestamp(entry_time) or df_dated["date"].iloc[0]
+            exit_ts = self._to_utc_timestamp(exit_time) or df_dated["date"].iloc[-1]
+            if exit_ts < entry_ts:
+                entry_ts, exit_ts = exit_ts, entry_ts
 
             mask = (df_dated["date"] >= entry_ts) & (df_dated["date"] <= exit_ts)
             trade_df = df_dated[mask]
 
             if len(trade_df) == 0:
-                return []
+                # 兜底：若找不到严格区间，退化为最近片段，避免空序列
+                trade_df = df_dated.tail(min(20, len(df_dated)))
 
             # 采样最多 20 个点
             if len(trade_df) > 20:
@@ -351,13 +500,22 @@ class ExperienceBuffer:
                 trade_df = trade_df.iloc[indices]
 
             feature_cols = [c for c in df.columns if c.startswith("%-")][:15]
+            if not feature_cols:
+                feature_cols = [c for c in ["rsi", "t3", "t3_slope", "t3_diff", "volume"] if c in df.columns]
+
             sequence = []
             for _, row in trade_df.iterrows():
-                point = {"close": float(row.get("close", 0))}
+                point = {
+                    "close": float(row.get("close", 0) or 0),
+                    "date": row.get("date").isoformat() if row.get("date") is not None else "",
+                }
                 for col in feature_cols:
                     val = row.get(col)
                     if val is not None and not (isinstance(val, float) and np.isnan(val)):
-                        point[col] = float(val)
+                        try:
+                            point[col] = float(val)
+                        except Exception:
+                            continue
                 sequence.append(point)
 
             return sequence
@@ -379,20 +537,30 @@ class ExperienceBuffer:
                 return 0.0, 0.0
 
             df_dated = df.copy()
-            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True)
-            entry_ts = pd.Timestamp(entry_time, tz="UTC")
-            exit_ts = pd.Timestamp(exit_time, tz="UTC") if isinstance(exit_time, datetime) else pd.Timestamp(str(exit_time), tz="UTC")
+            df_dated["date"] = pd.to_datetime(df_dated["date"], utc=True, errors="coerce")
+            df_dated = df_dated.dropna(subset=["date"])
+            if df_dated.empty:
+                return 0.0, 0.0
+
+            entry_ts = self._to_utc_timestamp(entry_time) or df_dated["date"].iloc[0]
+            exit_ts = self._to_utc_timestamp(exit_time) or df_dated["date"].iloc[-1]
+            if exit_ts < entry_ts:
+                entry_ts, exit_ts = exit_ts, entry_ts
 
             mask = (df_dated["date"] >= entry_ts) & (df_dated["date"] <= exit_ts)
             trade_df = df_dated[mask]
 
             if len(trade_df) == 0:
+                trade_df = df_dated.tail(min(50, len(df_dated)))
+
+            closes = pd.to_numeric(trade_df["close"], errors="coerce").dropna()
+            if closes.empty:
                 return 0.0, 0.0
 
             if is_short:
-                profits = (entry_price - trade_df["close"]) / entry_price
+                profits = (entry_price - closes) / entry_price
             else:
-                profits = (trade_df["close"] - entry_price) / entry_price
+                profits = (closes - entry_price) / entry_price
 
             max_dd = float(profits.min())
             max_profit = float(profits.max())
@@ -406,24 +574,62 @@ class ExperienceBuffer:
         """将经验保存到对应交易对的 JSON 文件。"""
         pair_safe = experience["pair"].replace("/", "_").replace(":", "_")
         filepath = self.storage_dir / f"{pair_safe}.json"
+        lockpath = filepath.with_name(f"{filepath.name}.lock")
 
-        records = []
-        if filepath.exists():
+        with self._exclusive_lock(lockpath):
+            records: list[dict] = []
+            if filepath.exists():
+                try:
+                    with open(filepath, "r") as f:
+                        loaded = json.load(f)
+                    records = loaded if isinstance(loaded, list) else []
+                except json.JSONDecodeError:
+                    # 保护性备份损坏文件，避免后续加载反复报错
+                    try:
+                        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        filepath.replace(filepath.with_name(f"{filepath.name}.corrupt_{ts}"))
+                    except Exception:
+                        pass
+                    records = []
+                except Exception:
+                    records = []
+
+            trade_id = int(experience.get("trade_id", 0) or 0)
+            if trade_id > 0:
+                for record in records:
+                    try:
+                        if int(record.get("trade_id", 0) or 0) == trade_id:
+                            logger.info(
+                                "[ExperienceBuffer] Skip duplicate trade_id=%s pair=%s",
+                                trade_id,
+                                experience["pair"],
+                            )
+                            return
+                    except Exception:
+                        continue
+
+            records.append(experience)
+
+            # 限制每个文件大小
+            max_per_pair = max(self.max_experiences // 5, 1)  # 假设约5个交易对
+            if len(records) > max_per_pair:
+                records = records[-max_per_pair:]
+
+            tmp_path = filepath.with_name(
+                f"{filepath.name}.tmp.{os.getpid()}.{int(time.time() * 1000)}"
+            )
             try:
-                with open(filepath, "r") as f:
-                    records = json.load(f)
-            except (json.JSONDecodeError, Exception):
-                records = []
-
-        records.append(experience)
-
-        # 限制每个文件大小
-        max_per_pair = self.max_experiences // 5  # 假设约5个交易对
-        if len(records) > max_per_pair:
-            records = records[-max_per_pair:]
-
-        with open(filepath, "w") as f:
-            json.dump(records, f, indent=2, default=str)
+                with open(tmp_path, "w") as f:
+                    json.dump(records, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, filepath)
+            finally:
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except Exception:
+                    pass
 
     def _load_all_experiences(self) -> list[dict]:
         """从所有 JSON 文件加载经验。"""

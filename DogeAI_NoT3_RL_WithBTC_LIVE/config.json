@@ -1,13 +1,12 @@
 {
-  "max_open_trades": 5,
+  "max_open_trades": 2,
   "stake_currency": "USDT",
   "stake_amount": "unlimited",
   "tradable_balance_ratio": 0.99,
-  "fiat_display_currency": "USD",
   "dry_run": false,
   "dry_run_wallet": 1000,
   "trading_mode": "futures",
-  "margin_mode": "cross",
+  "margin_mode": "isolated",
   "cancel_open_orders_on_exit": false,
   "unfilledtimeout": {
     "entry": 10,
@@ -35,7 +34,7 @@
     "entry": "market",
     "exit": "market",
     "stoploss": "market",
-    "stoploss_on_exchange": true,
+    "stoploss_on_exchange": false,
     "stoploss_on_exchange_interval": 60,
     "stoploss_on_exchange_limit_ratio": 0.99
   },
@@ -45,7 +44,8 @@
     "secret": "momH1aP9ohmzhmH79xHKUGxGBxVfTHQibLZuq1t5RZu75chqIVDdS7LSFDvGmSUd",
     "ccxt_config": {
       "enableRateLimit": true,
-      "rateLimit": 120,
+      "timeout": 30000,
+      "rateLimit": 350,
       "options": {
         "defaultType": "swap",
         "adjustForTimeDifference": true,
@@ -56,9 +56,10 @@
     },
     "ccxt_async_config": {
       "enableRateLimit": true,
-      "rateLimit": 120
+      "timeout": 30000,
+      "rateLimit": 350
     },
-    "leverage": 3,
+    "leverage": 1,
     "pair_whitelist": [
       "ETH/USDT:USDT",
       "BNB/USDT:USDT",
@@ -99,12 +100,12 @@
   "freqai": {
     "enabled": true,
     "purge_old_models": 4,
-    "train_period_days": 30,
+    "train_period_days": 45,
     "backtest_period_days": 90,
-    "live_retrain_hours": 12,
+    "live_retrain_hours": 18,
     "continual_learning": true,
-    "identifier": "dogeai_not3_rl_withbtc_live_v2",
-    "freqaimodel": "ReinforcementLearner",
+    "identifier": "dogeai_not3_rl_withbtc_live_v2_lev1x_20260320_110455",
+    "freqaimodel": "MyTicketRL",
     "feature_parameters": {
       "include_timeframes": [
         "5m",
@@ -133,7 +134,7 @@
       "random_state": 1
     },
     "rl_config": {
-      "train_cycles": 25,
+      "train_cycles": 12,
       "max_trade_duration_candles": 200,
       "max_training_drawdown_pct": 0.2,
       "cpu_count": 2,
@@ -146,21 +147,34 @@
         128
       ],
       "model_reward_parameters": {
-        "rr": 1.5,
-        "profit_aim": 0.04,
-        "win_reward_factor": 3.0,
+        "rr": 1.2,
+        "profit_aim": 0.03,
+        "win_reward_factor": 2.4,
         "time_penalty": 0.0005,
-        "dd_penalty": 0.05,
-        "loss_penalty_factor": 2.5,
-        "early_exit_penalty": 0.3
+        "dd_penalty": 0.06,
+        "loss_penalty_factor": 2.8,
+        "early_exit_penalty": 0.35,
+        "tail_loss_threshold": 0.025,
+        "tail_loss_multiplier": 6.0,
+        "tail_loss_power": 2.0,
+        "reward_clip": 100.0,
+        "profit_hold_factor": 0.01,
+        "max_trade_duration_hours": 46.0,
+        "max_trade_duration_bars": 552,
+        "age_linear_penalty_per_bar": 1e-05,
+        "early_exit_bonus_beta": 0.002,
+        "forced_close_penalty": 0.03
       },
       "batch_size": 128,
       "experience_replay": {
         "enabled": true,
-        "replay_ratio": 0.3,
+        "replay_ratio": 0.2,
         "max_experiences": 2000,
         "loss_weight": 2.0,
-        "min_experiences_to_start": 3
+        "min_experiences_to_start": 8
+      },
+      "env_kwargs": {
+        "user_environment": "DogeAIRewardEnv"
       }
     },
     "model_training_parameters": {

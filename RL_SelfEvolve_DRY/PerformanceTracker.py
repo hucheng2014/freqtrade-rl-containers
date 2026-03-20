@@ -53,11 +53,17 @@ class PerformanceTracker:
         lookback_trades: int = 50,
         adjustment_rate: float = 0.1,
         history_file: str = "user_data/performance_history.json",
+        min_trade_count: int = 20,
+        min_positive_avg_profit: float = 0.0005,
+        loss_win_ratio_guard: float = 1.15,
     ):
         self.storage_dir = Path(storage_dir)
         self.lookback_trades = lookback_trades
         self.adjustment_rate = adjustment_rate
         self.history_file = Path(history_file)
+        self.min_trade_count = max(int(min_trade_count or 0), 10)
+        self.min_positive_avg_profit = float(min_positive_avg_profit)
+        self.loss_win_ratio_guard = max(float(loss_win_ratio_guard or 1.0), 1.0)
         self._adjustment_history: list[dict] = []
 
     def compute_adaptive_params(
@@ -80,10 +86,10 @@ class PerformanceTracker:
         # 取最近 N 笔交易
         recent = experiences[-self.lookback_trades:]
 
-        if len(recent) < 10:
+        if len(recent) < self.min_trade_count:
             logger.info(
                 f"[PerformanceTracker] Only {len(recent)} trades, "
-                f"need ≥10. Using base params."
+                f"need ≥{self.min_trade_count}. Using base params."
             )
             return params
 
@@ -105,7 +111,7 @@ class PerformanceTracker:
         rate = self.adjustment_rate
 
         # 规则 1: 胜率过低 → 更保守
-        if metrics["win_rate"] < 0.40:
+        if metrics["win_rate"] < 0.40 and metrics["avg_profit"] < 0:
             adj_win = 1.0 + 0.2 * rate
             adj_dd = 1.0 + 0.3 * rate
             params["win_reward_factor"] *= adj_win
@@ -116,7 +122,10 @@ class PerformanceTracker:
             }
 
         # 规则 2: 胜率较高 → 适当放松
-        elif metrics["win_rate"] > 0.60:
+        elif (
+            metrics["win_rate"] > 0.60
+            and metrics["avg_profit"] > self.min_positive_avg_profit
+        ):
             adj_win = 1.0 - 0.1 * rate
             params["win_reward_factor"] *= adj_win
             adjustments["high_winrate"] = {
@@ -124,7 +133,11 @@ class PerformanceTracker:
             }
 
         # 规则 3: 平均亏损 > 平均盈利 → 降低目标
-        if metrics["avg_win"] > 0 and abs(metrics["avg_loss"]) > metrics["avg_win"]:
+        if (
+            metrics["avg_profit"] < 0
+            and metrics["avg_win"] > 0
+            and abs(metrics["avg_loss"]) > metrics["avg_win"] * self.loss_win_ratio_guard
+        ):
             adj_aim = 1.0 - 0.1 * rate
             params["profit_aim"] *= adj_aim
             adjustments["loss_gt_win"] = {
