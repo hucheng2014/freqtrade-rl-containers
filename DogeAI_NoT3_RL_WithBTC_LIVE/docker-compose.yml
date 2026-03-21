@@ -1,0 +1,34 @@
+services:
+  DogeAI_NoT3_RL_WithBTC_LIVE:
+    image: freqtradeorg/freqtrade:stable_freqairl
+    container_name: DogeAI_NoT3_RL_WithBTC_LIVE
+    restart: unless-stopped
+    mem_limit: 6g
+    memswap_limit: 6g
+    environment:
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - NUMEXPR_NUM_THREADS=2
+      - TOKENIZERS_PARALLELISM=false
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ./config.json:/freqtrade/config.json
+    ports:
+      - "8080:8080"
+    command: >
+      trade
+      --config /freqtrade/config.json
+      --strategy MTF_BalancedPerformance_DogeAI_NoT3_RL
+      --freqaimodel MyTicketRL
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    networks:
+      - freqtrade_network
+
+networks:
+  freqtrade_network:
+    driver: bridge

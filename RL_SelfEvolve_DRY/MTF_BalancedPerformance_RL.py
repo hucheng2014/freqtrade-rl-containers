@@ -542,6 +542,8 @@ class MTF_BalancedPerformance_RL(IStrategy):
         updated_pairs = []
 
         try:
+            if hasattr(api, 'options'):
+                api.options['warnOnFetchOpenOrdersWithoutSymbol'] = False
             open_orders = api.fetch_open_orders()
         except Exception as exc:
             logger.warning(f"[StartupGuard] Could not fetch open orders before futures seed: {exc}")

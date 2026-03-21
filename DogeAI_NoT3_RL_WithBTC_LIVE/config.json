@@ -51,7 +51,8 @@
         "adjustForTimeDifference": true,
         "portfolioValues": false,
         "tradesCount": 1000,
-        "loadMarkets": false
+        "loadMarkets": false,
+        "warnOnFetchOpenOrdersWithoutSymbol": false
       }
     },
     "ccxt_async_config": {
