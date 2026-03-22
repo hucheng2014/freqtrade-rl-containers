@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  RL_SelfEvolve_DRY:
+    image: freqtradeorg/freqtrade:stable_freqairl
+    container_name: RL_SelfEvolve_DRY
+    restart: unless-stopped
+    mem_limit: 8g
+    memswap_limit: 10g
+    environment:
+      - SQLALCHEMY_POOL_SIZE=20
+      - SQLALCHEMY_MAX_OVERFLOW=30
+      - SQLALCHEMY_POOL_TIMEOUT=60
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - NUMEXPR_NUM_THREADS=2
+      - TOKENIZERS_PARALLELISM=false
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ./config_selfevolve.json:/freqtrade/config.json
+    ports:
+      - "8084:8084"
+    command: >
+      trade
+      --config /freqtrade/config.json
+      --strategy MTF_BalancedPerformance_RL
+      --freqaimodel MyTicketRL_v2
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    networks:
+      - freqtrade_network
+
+networks:
+  freqtrade_network:
+    driver: bridge

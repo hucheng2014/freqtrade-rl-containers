@@ -134,6 +134,20 @@ class MTF_BalancedPerformance_DogeAI(IStrategy):
             except Exception:
                 return float(default)
 
+    @staticmethod
+    def _fill_leading_nans(series: pd.Series, fallback: float) -> pd.Series:
+        if series.empty or not series.isna().any():
+            return series
+
+        first_valid_pos = next((idx for idx, value in enumerate(series) if pd.notna(value)), None)
+        if first_valid_pos is None:
+            return series.fillna(fallback)
+
+        filled = series.copy()
+        if first_valid_pos > 0:
+            filled.iloc[:first_valid_pos] = filled.iloc[first_valid_pos]
+        return filled.fillna(fallback)
+
     def leverage(
         self,
         pair: str,
@@ -173,21 +187,49 @@ class MTF_BalancedPerformance_DogeAI(IStrategy):
 
     # Doge AI feature model.
     def feature_engineering_expand_all(self, dataframe: DataFrame, period: int, **kwargs) -> DataFrame:
-        dataframe["%-rsi-period"] = ta.RSI(dataframe, timeperiod=period)
-        dataframe["%-mfi-period"] = ta.MFI(dataframe, timeperiod=period)
-        dataframe["%-adx-period"] = ta.ADX(dataframe, timeperiod=period)
+        dataframe["%-rsi-period"] = self._fill_leading_nans(
+            ta.RSI(dataframe, timeperiod=period),
+            50.0,
+        )
+        dataframe["%-mfi-period"] = self._fill_leading_nans(
+            ta.MFI(dataframe, timeperiod=period),
+            50.0,
+        )
+        dataframe["%-adx-period"] = self._fill_leading_nans(
+            ta.ADX(dataframe, timeperiod=period),
+            0.0,
+        )
         return dataframe
 
     def feature_engineering_expand_basic(self, dataframe: DataFrame, **kwargs) -> DataFrame:
-        dataframe["%-pct_change"] = dataframe["close"].pct_change(1)
-        dataframe["%-volatility"] = dataframe["close"].rolling(window=10).std() / (dataframe["close"] + 1e-8)
+        dataframe["%-pct_change"] = self._fill_leading_nans(
+            dataframe["close"].pct_change(1),
+            0.0,
+        )
+        dataframe["%-volatility"] = self._fill_leading_nans(
+            dataframe["close"].rolling(window=10).std() / (dataframe["close"] + 1e-8),
+            0.0,
+        )
         return dataframe
 
     def feature_engineering_standard(self, dataframe: DataFrame, **kwargs) -> DataFrame:
-        dataframe["%-ema_fast"] = ta.EMA(dataframe, timeperiod=21)
-        dataframe["%-ema_slow"] = ta.EMA(dataframe, timeperiod=55)
-        dataframe["%-rsi"] = ta.RSI(dataframe, timeperiod=14)
-        dataframe["%-atr_percent"] = ta.ATR(dataframe, timeperiod=14) / dataframe["close"]
+        close_fallback = float(dataframe["close"].iloc[0]) if not dataframe.empty else 0.0
+        dataframe["%-ema_fast"] = self._fill_leading_nans(
+            ta.EMA(dataframe, timeperiod=21),
+            close_fallback,
+        )
+        dataframe["%-ema_slow"] = self._fill_leading_nans(
+            ta.EMA(dataframe, timeperiod=55),
+            close_fallback,
+        )
+        dataframe["%-rsi"] = self._fill_leading_nans(
+            ta.RSI(dataframe, timeperiod=14),
+            50.0,
+        )
+        dataframe["%-atr_percent"] = self._fill_leading_nans(
+            ta.ATR(dataframe, timeperiod=14) / dataframe["close"],
+            0.0,
+        )
         return dataframe
 
     def set_freqai_targets(self, dataframe: DataFrame, **kwargs) -> DataFrame:

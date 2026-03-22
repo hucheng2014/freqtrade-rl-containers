@@ -6,6 +6,8 @@ MTF_BalancedPerformance_DogeAI_NoT3
 - 保留原有的 MTF 趋势投票、支撑阻力、BTC 过滤、FreqAI 预测/风控逻辑
 """
 
+import logging
+
 from freqtrade.strategy import merge_informative_pair
 from pandas import DataFrame
 import pandas as pd
@@ -14,6 +16,9 @@ from MTF_BalancedPerformance_DogeAI import (
     MTF_BalancedPerformance_DogeAI,
     two_pole_filter,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class MTF_BalancedPerformance_DogeAI_NoT3(MTF_BalancedPerformance_DogeAI):
@@ -118,7 +123,21 @@ class MTF_BalancedPerformance_DogeAI_NoT3(MTF_BalancedPerformance_DogeAI):
                     dataframe["btc_trend_down"] = btc_down
 
         if self.freqai_enabled and hasattr(self, "freqai"):
-            dataframe = self.freqai.start(dataframe, metadata, self)
+            try:
+                freqai_df = self.freqai.start(dataframe, metadata, self)
+                if not isinstance(freqai_df, DataFrame):
+                    raise TypeError(f'FreqAI returned {type(freqai_df).__name__}, expected DataFrame')
+                dataframe = freqai_df
+            except Exception as exc:
+                logger.warning('[Strategy] FreqAI start failed for %s: %s', pair, exc)
+                if 'do_predict' not in dataframe.columns:
+                    dataframe['do_predict'] = 0
+                else:
+                    dataframe['do_predict'] = dataframe['do_predict'].fillna(0)
+                if '&-action' not in dataframe.columns:
+                    dataframe['&-action'] = 0
+                else:
+                    dataframe['&-action'] = dataframe['&-action'].fillna(0)
 
         return dataframe
 

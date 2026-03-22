@@ -50,12 +50,22 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
     rl_exit_long_deadband_max = rl_exit_deadband_max
     rl_exit_short_deadband_min = rl_exit_deadband_min
     rl_exit_short_deadband_max = rl_exit_deadband_max
+    rl_exit_deadband_atr_period = 14
+    rl_exit_deadband_atr_loss_multiplier = 0.35
+    rl_exit_deadband_atr_profit_multiplier = 0.55
+    rl_exit_deadband_loss_cap = 0.0060
+    rl_exit_deadband_profit_cap = 0.0090
     max_hold_hours = 46.0
+    max_hold_trend_timeframes = ("1h", "4h")
+    max_hold_trend_fast_ema = 21
+    max_hold_trend_slow_ema = 55
+    max_hold_guard_log_interval_minutes = 15
     soft_stoploss_fraction = 0.75
     soft_stoploss_min_hold_minutes = 30
     reentry_loss_lookback_hours = 24
     reentry_loss_cooldown_minutes = 90
     reentry_loss_streak_cooldown_minutes = 240
+    reentry_stoploss_cooldown_minutes = 15
     small_win_reentry_profit_threshold = 0.0035
     small_win_reentry_cooldown_minutes = 30
     futures_settings_retry_minutes = 30
@@ -73,6 +83,7 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
         self._futures_pair_pending = {}
         self._futures_open_orders_pending = False
         self._last_entry_guard_log_at = {}
+        self._last_max_hold_guard_log_at = {}
         if ExperienceBuffer:
             exchange_cfg = (config or {}).get("exchange") or {}
             lev = exchange_cfg.get("leverage", 1.0)
@@ -303,15 +314,86 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
         except Exception:
             return 1.0
 
+    def _should_ignore_reentry_loss_reason(self, exit_reason: str) -> bool:
+        reason = str(exit_reason or "")
+        return reason.startswith("max_hold")
+
+    def _reentry_cooldown_for_reason(self, exit_reason: str, streak: int) -> float:
+        reason = str(exit_reason or "")
+        if self._should_ignore_reentry_loss_reason(reason):
+            return 0.0
+        if reason == "stop_loss" or reason.startswith("soft_stop_"):
+            return float(getattr(self, "reentry_stoploss_cooldown_minutes", 15.0) or 15.0)
+        return float(
+            self.reentry_loss_streak_cooldown_minutes
+            if streak >= 2 else self.reentry_loss_cooldown_minutes
+        )
+
+    def _higher_tf_trend_ok(self, pair: str, is_short: bool) -> tuple[bool, dict[str, str]]:
+        states: dict[str, str] = {}
+        timeframes = tuple(getattr(self, "max_hold_trend_timeframes", ("1h", "4h")) or ("1h", "4h"))
+        fast_period = int(getattr(self, "max_hold_trend_fast_ema", 21) or 21)
+        slow_period = int(getattr(self, "max_hold_trend_slow_ema", 55) or 55)
+
+        for timeframe in timeframes:
+            state = "unknown"
+            try:
+                dataframe = self.dp.get_pair_dataframe(pair=pair, timeframe=timeframe) if getattr(self, "dp", None) else None
+                if dataframe is not None and not dataframe.empty and "close" in dataframe.columns:
+                    closes = pd.to_numeric(dataframe["close"], errors="coerce").dropna().tail(max(slow_period + 3, 80))
+                    if len(closes) >= slow_period + 2:
+                        ema_fast = closes.ewm(span=fast_period, adjust=False).mean()
+                        ema_slow = closes.ewm(span=slow_period, adjust=False).mean()
+                        last_close = float(closes.iloc[-1])
+                        fast_now = float(ema_fast.iloc[-1])
+                        fast_prev = float(ema_fast.iloc[-2])
+                        slow_now = float(ema_slow.iloc[-1])
+                        if is_short:
+                            state = (
+                                "aligned"
+                                if last_close <= fast_now and fast_now <= slow_now and fast_now <= fast_prev
+                                else "broken"
+                            )
+                        else:
+                            state = (
+                                "aligned"
+                                if last_close >= fast_now and fast_now >= slow_now and fast_now >= fast_prev
+                                else "broken"
+                            )
+            except Exception:
+                state = "unknown"
+            states[timeframe] = state
+
+        return any(state == "aligned" for state in states.values()), states
+
+    def _should_delay_max_hold_exit(self, pair: str, trade, current_time, age_hours: float, max_hold_hours: float) -> bool:
+        is_short = bool(getattr(trade, "is_short", False))
+        trend_ok, states = self._higher_tf_trend_ok(pair, is_short)
+        if not trend_ok:
+            return False
+
+        now_utc = self._to_utc_dt(current_time) or datetime.now(timezone.utc)
+        log_key = f"{pair}:{'short' if is_short else 'long'}"
+        last_logged = self._last_max_hold_guard_log_at.get(log_key)
+        log_interval = timedelta(minutes=float(getattr(self, "max_hold_guard_log_interval_minutes", 15.0) or 15.0))
+        if not last_logged or now_utc - last_logged >= log_interval:
+            state_text = ", ".join(f"{tf}={state}" for tf, state in states.items())
+            logger.info(
+                f"[RiskExit] Holding {pair} beyond {max_hold_hours:.2f}h because higher-timeframe trend is still aligned "
+                f"(age={age_hours:.2f}h, {state_text})"
+            )
+            self._last_max_hold_guard_log_at[log_key] = now_utc
+        return True
+
     def _recent_pair_side_loss_state(self, pair: str, side: str, reference_time):
         exp_buffer = self._get_exp_buffer(self._configured_leverage())
         ref_utc = self._to_utc_dt(reference_time)
         if not exp_buffer or not ref_utc:
-            return 0, None
+            return 0, None, ""
 
         experiences = exp_buffer.load_experiences(pair=pair, min_count=0)
         if not experiences:
-            return 0, None
+            return 0, None, ""
 
         lookback_cutoff = ref_utc - timedelta(hours=self.reentry_loss_lookback_hours)
         filtered = []
@@ -325,34 +407,37 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
                 profit = float(exp.get('profit_ratio', 0.0) or 0.0)
             except Exception:
                 profit = 0.0
-            filtered.append((ts, profit))
+            exit_reason = str(exp.get("exit_reason") or "")
+            if profit < 0 and self._should_ignore_reentry_loss_reason(exit_reason):
+                continue
+            filtered.append((ts, profit, exit_reason))
 
         if not filtered:
-            return 0, None
+            return 0, None, ""
 
         filtered.sort(key=lambda item: item[0], reverse=True)
         if filtered[0][1] >= 0:
-            return 0, None
+            return 0, None, ""
 
         streak = 0
-        for _, profit in filtered:
+        latest_reason = filtered[0][2]
+        for _, profit, _ in filtered:
             if profit < 0:
                 streak += 1
             else:
                 break
-        return streak, filtered[0][0]
+        return streak, filtered[0][0], latest_reason
 
     def _should_block_reentry(self, pair: str, side: str, reference_time):
-        streak, latest_loss_time = self._recent_pair_side_loss_state(pair, side, reference_time)
+        streak, latest_loss_time, latest_exit_reason = self._recent_pair_side_loss_state(pair, side, reference_time)
         ref_utc = self._to_utc_dt(reference_time)
         if streak <= 0 or not latest_loss_time or not ref_utc:
             return False, streak, None, 0.0
 
         age_minutes = max((ref_utc - latest_loss_time).total_seconds() / 60.0, 0.0)
-        cooldown = float(
-            self.reentry_loss_streak_cooldown_minutes
-            if streak >= 2 else self.reentry_loss_cooldown_minutes
-        )
+        cooldown = self._reentry_cooldown_for_reason(latest_exit_reason, streak)
+        if cooldown <= 0:
+            return False, streak, age_minutes, cooldown
         return age_minutes < cooldown, streak, age_minutes, cooldown
 
     def _filled_order_profit_ratio(self, trade, order) -> float | None:
@@ -371,6 +456,66 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
             except Exception:
                 continue
         return None
+
+    def _current_exit_atr_ratio(self, pair: str) -> float | None:
+        try:
+            if not getattr(self, "dp", None):
+                return None
+            analyzed = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            dataframe = analyzed[0] if isinstance(analyzed, tuple) else analyzed
+            if dataframe is None or dataframe.empty:
+                return None
+            if not {"high", "low", "close"}.issubset(dataframe.columns):
+                return None
+
+            period = int(getattr(self, "rl_exit_deadband_atr_period", 14) or 14)
+            period = max(3, period)
+            recent = dataframe[["high", "low", "close"]].tail(period + 1).copy()
+            for col in ("high", "low", "close"):
+                recent[col] = pd.to_numeric(recent[col], errors="coerce")
+            recent = recent.dropna(subset=["high", "low", "close"])
+            if len(recent) < 2:
+                return None
+
+            prev_close = recent["close"].shift(1)
+            true_range = pd.concat(
+                [
+                    (recent["high"] - recent["low"]).abs(),
+                    (recent["high"] - prev_close).abs(),
+                    (recent["low"] - prev_close).abs(),
+                ],
+                axis=1,
+            ).max(axis=1)
+            atr = float(true_range.tail(period).mean())
+            last_close = float(recent["close"].iloc[-1])
+            if not np.isfinite(atr) or not np.isfinite(last_close) or last_close <= 0:
+                return None
+            return atr / last_close
+        except Exception:
+            return None
+
+    def _rl_exit_deadband_bounds(self, pair: str, side: str) -> tuple[float, float, float | None]:
+        deadband_min = float(
+            getattr(self, f"rl_exit_{side}_deadband_min", getattr(self, "rl_exit_deadband_min", -0.0020))
+        )
+        deadband_max = float(
+            getattr(self, f"rl_exit_{side}_deadband_max", getattr(self, "rl_exit_deadband_max", 0.0035))
+        )
+        atr_ratio = self._current_exit_atr_ratio(pair)
+        if atr_ratio is None or atr_ratio <= 0:
+            return deadband_min, deadband_max, None
+
+        loss_mult = float(getattr(self, "rl_exit_deadband_atr_loss_multiplier", 0.35) or 0.35)
+        profit_mult = float(getattr(self, "rl_exit_deadband_atr_profit_multiplier", 0.55) or 0.55)
+        loss_cap = float(getattr(self, "rl_exit_deadband_loss_cap", 0.0060) or 0.0060)
+        profit_cap = float(getattr(self, "rl_exit_deadband_profit_cap", 0.0090) or 0.0090)
+
+        dynamic_loss = max(abs(deadband_min), atr_ratio * loss_mult)
+        dynamic_profit = max(deadband_max, atr_ratio * profit_mult)
+
+        deadband_min = -min(dynamic_loss, loss_cap)
+        deadband_max = min(dynamic_profit, profit_cap)
+        return deadband_min, deadband_max, atr_ratio
 
     def _apply_small_win_reentry_cooldown(
         self,
@@ -394,7 +539,7 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
             return
 
         threshold = float(getattr(self, "small_win_reentry_profit_threshold", 0.0035) or 0.0035)
-        if profit_ratio >= threshold:
+        if not 0.0 <= profit_ratio < threshold:
             return
 
         cooldown_minutes = float(getattr(self, "small_win_reentry_cooldown_minutes", 30.0) or 30.0)
@@ -834,8 +979,11 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
             age_hours = max((current_time - open_dt).total_seconds(), 0.0) / 3600.0
             max_hold_hours = float(getattr(self, 'max_hold_hours', 46.0) or 46.0)
             if age_hours > max_hold_hours:
+                if self._should_delay_max_hold_exit(pair, trade, current_time, age_hours, max_hold_hours):
+                    return None
                 logger.info(
-                    f"[RiskExit] Force exiting {pair} after {age_hours:.2f}h > {max_hold_hours:.2f}h"
+                    f"[RiskExit] Force exiting {pair} after {age_hours:.2f}h > {max_hold_hours:.2f}h "
+                    f"because higher-timeframe trend is no longer aligned"
                 )
                 return 'max_hold_46h'
 
@@ -1007,17 +1155,13 @@ class MTF_BalancedPerformance_DogeAI_NoT3_RL(MTF_BalancedPerformance_DogeAI_NoT3
 
             if current_profit is not None:
                 side = 'short' if exit_reason == 'rl_exit_short' else 'long'
-                deadband_min = float(
-                    getattr(self, f'rl_exit_{side}_deadband_min', getattr(self, 'rl_exit_deadband_min', -0.0020))
-                )
-                deadband_max = float(
-                    getattr(self, f'rl_exit_{side}_deadband_max', getattr(self, 'rl_exit_deadband_max', 0.0035))
-                )
+                deadband_min, deadband_max, atr_ratio = self._rl_exit_deadband_bounds(pair, side)
                 if deadband_min < current_profit < deadband_max:
+                    atr_note = f", atr={atr_ratio:.2%}" if atr_ratio is not None else ""
                     logger.info(
                         f"[Strategy] Blocked {exit_reason} for {pair}: "
                         f"profit={current_profit:.4%} inside fee deadband "
-                        f"({deadband_min:.2%}, {deadband_max:.2%})"
+                        f"({deadband_min:.2%}, {deadband_max:.2%}){atr_note}"
                     )
                     return False
         return True
